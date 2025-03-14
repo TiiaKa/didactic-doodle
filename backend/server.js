@@ -1,53 +1,102 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
-const bodyParser = require('body-parser');
+const { Sequelize, DataTypes } = require('sequelize');
+const path = require('path');
+const cors = require('cors');
 
 const app = express();
 const port = 3000;
 
-app.use(bodyParser.json());
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
-let db = new sqlite3.Database('./mydatabase.db', (err) => {
-    if (err) {
-        console.error(err.message);
-    }
-    console.log('Connected to the SQLite database.');
+// Connect to a SQLite database using Sequelize
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: './database.db',
+    logging: false // Print SQL commands
 });
 
-db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    email TEXT
-)`, (err) => {
-    if (err) {
-        console.error(err.message);
+// Define User model
+const User = sequelize.define('User', {
+    id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true
+    },
+    name: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
     }
-    console.log('Table created or already exists.');
+}, {
+    timestamps: false
 });
 
-/*let name = 'John Doe';
-let email = 'john.doe@example.com';*/
+// Synchronize database
+sequelize.sync()
+    .then(() => console.log("Database synchronized"))
+    .catch(err => console.error("Error synchronizing database:", err));
 
-app.post('/add-user', (req, res) => {
-    const { name, email } = req.body;
-    db.run(`INSERT INTO users (name, email) VALUES (?, ?)`, [name, email], function(err) {
-    if (err) {
-        return res.status(500).json({ error: err.message });
-    }
-    res.json({ message: `A row has been inserted with rowid ${this.lastID}` });
-    });
-});
-
-app.get('/users', (req, res) => {
-    db.all(`SELECT * FROM users`, [], (err, rows) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
+// Create a new user (Create)
+app.post('/users', async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        if (!name || !email) {
+            return res.status(400).json({ error: 'Name and email are required' });
         }
-        res.json({ users: rows });
-    });
+        const user = await User.create({ name, email });
+        res.status(201).json(user);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+// Search all users (Read)
+app.get('/users', async (req, res) => {
+    try {
+        const users = await User.findAll();
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// Update user information (Update)
+app.put('/users/:id', async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        const { id } = req.params;
+        if (!name || !email) {
+            return res.status(400).json({ error: 'Name and email are required' });
+        }
+        const user = await User.findByPk(id);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        user.name = name;
+        user.email = email;
+        await user.save();
+        res.json({ message: 'User information updated', user });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
+// Delete user (Delete)
+app.delete('/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = await User.findByPk(id);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        await user.destroy();
+        res.json({ message: 'User deleted', id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
